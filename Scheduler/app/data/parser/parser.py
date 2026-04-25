@@ -3,24 +3,38 @@ from datetime import datetime
 
 BASE_URL = "https://surpk.ru/api/schedule"
 
-def get_base_info():
-    url = f"{BASE_URL}/index"
-    response = requests.get(url)
-    data = response.json()
+dictionaries_data = 0
+base_info = 0
 
-    return data["baseInfo"]["data"]
+def get_base_info():
+    global base_info
+
+    if base_info == 0:
+        url = f"{BASE_URL}/index"
+        response = requests.get(url)
+        data = response.json()
+
+        base_info = data["baseInfo"]["data"]
+
+    return base_info
 
 def build_dict(items):
     return {item["id"]: item["name"] for item in items}
 
 def get_dictionaries():
-    base = get_base_info()
-    return {
-        "groups": build_dict(base["groups"]),
-        "teachers": build_dict(base["teachers"]),
-        "disciplines": build_dict(base["disciplines"]),
-        "audithories": build_dict(base["audithories"]),
-    }
+    global dictionaries_data
+
+    if dictionaries_data == 0:
+        base = get_base_info()
+        dictionaries_data = {
+            "groups": build_dict(base["groups"]),
+            "teachers": build_dict(base["teachers"]),
+            "disciplines": build_dict(base["disciplines"]),
+            "audithories": build_dict(base["audithories"]),
+        }
+    
+    
+    return dictionaries_data
 
 def get_schedule_raw(timestamp):
     url = f"{BASE_URL}/schedule"
@@ -42,6 +56,23 @@ def get_available_groups():
 
     groups = dictionaries["groups"]
     return groups
+
+def get_groups_by_courses():
+    dictionaries = get_dictionaries()
+
+    groups = dictionaries["groups"]
+    courses = {}
+    newest_course = 0
+    for id, group in groups.items():
+        course = int(group[0])*100
+        if course not in courses:
+            courses[course] = [group]
+            if course > newest_course:
+                newest_course = course
+        else:
+            courses[course].append(group)
+    
+    return courses, newest_course
 
 def parse_schedule(group_name: str, timestamp: int):
     dictionaries = get_dictionaries()

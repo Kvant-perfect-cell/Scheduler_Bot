@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from app.bot.keyboards import keyboards
 from app.services.schedule_service import get_schedule_for_today
 from app.services.user_service import set_user_group, get_user_group
+from app.data.parser.parser import get_base_info
 
 router = Router()
 
@@ -13,23 +14,32 @@ user_groups = {}
 LESSON_TIMES = {
     1: "08:30 - 9:50",
     2: "10:00 - 11:20",
-    3: "12:10 - 13:30",
+    3: "11:30 - 12:50",
     4: "13:40 - 15:00",
     5: "15:10 - 16:30",
-    6: "16:40 - 18:00",
+    6: "16:35 - 17:55",
 }
 
 def split_message(text, max_length=4000):
     return [text[i:i+max_length] for i in range(0, len(text), max_length)]
 
-@router.message(Command("start"))
+@router.message(
+    Command("start")
+)
+@router.message(
+    lambda message: message.text == "Назад"
+)
 async def start_handler(message: Message):
+    get_base_info()
     await message.answer(
         "Привет! Выбери действие 👇",
         reply_markup=keyboards.main_keyboard()
     )
 
-@router.message(lambda message: message.text == "📅 Сегодня")
+
+@router.message(
+    lambda message: message.text == "Расписание на сегодня"
+)
 async def today_button_handler(message: Message):
     group = get_user_group(message.from_user.id)
 
@@ -44,8 +54,6 @@ async def today_button_handler(message: Message):
         return
 
     text = f"📅 Сегодня ({group}):\n\n"
-    for lesson in schedule:
-        print(lesson["time"])
 
     for lesson in schedule:
         time = LESSON_TIMES.get(lesson["time"], str(lesson["time"]))
@@ -57,11 +65,23 @@ async def today_button_handler(message: Message):
     for part in split_message(text):
         await message.answer(part)
 
-@router.message(Command("setgroup"))
-async def set_group_handler(message: Message):
-    try:
-        group = message.text.split()[1]
-        set_user_group(message.from_user.id, group)
-        await message.answer(f"Группа сохранена: {group}")
-    except:
-        await message.answer("Используй: /setgroup 501")
+@router.message(
+    lambda message: message.text == "Выбрать группу"
+)
+async def select_group(message: Message):
+   
+    await message.answer(
+        "Выберите курс:",
+        reply_markup=keyboards.courses_keyboard()
+    )
+
+@router.message(
+    lambda message: message.text and message.text.endswith("курс")
+)
+async def select_course(message: Message):
+    course = message.text[0]  # "1 курс" → "1"
+
+    await message.answer(
+        "Выберите группу курса:",
+        reply_markup=keyboards.groups_keyboard(course)
+    )
