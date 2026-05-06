@@ -3,8 +3,9 @@ from datetime import datetime
 
 BASE_URL = "https://surpk.ru/api/schedule"
 
-dictionaries_data = 0
 base_info = 0
+dictionaries_data = 0
+schedule_raw_data = 0
 
 def get_base_info():
     global base_info
@@ -33,19 +34,19 @@ def get_dictionaries():
             "audithories": build_dict(base["audithories"]),
         }
     
-    
     return dictionaries_data
 
 def get_schedule_raw(timestamp):
-    url = f"{BASE_URL}/schedule"
-    response = requests.get(url, params={"date": timestamp})
+    global schedule_raw_data
+    if schedule_raw_data == 0:
+        url = f"{BASE_URL}/schedule"
+        response = requests.get(url, params={"date": timestamp})
 
-    print("STATUS:", response.status_code)
-    print("TEXT:", response.text[:200])  # 🔥 это спасёт тебя
+        # print("STATUS:", response.status_code)
+        # print("TEXT:", response.text[:200])
 
-    data = response.json()
-
-    return data["schedule"]["data"]["schedule"]
+        schedule_raw_data = response.json()
+    return schedule_raw_data["schedule"]["data"]["schedule"]
 
 def get_today_timestamp():
     today = datetime.now()
@@ -80,6 +81,7 @@ def parse_schedule(group_name: str, timestamp: int):
     groups = dictionaries["groups"]
     disciplines = dictionaries["disciplines"]
     teachers = dictionaries["teachers"]
+    audithories = dictionaries["audithories"]
 
     # найти id группы по имени
     group_id = None
@@ -101,21 +103,17 @@ def parse_schedule(group_name: str, timestamp: int):
         day_date = datetime.fromtimestamp(day["date"] / 1000).date()
 
         if day_date != today:
-            continue  # 🔥 пропускаем не сегодня
-
-        print(day["lessons"])
+            continue
+        
         for lesson in day["lessons"]:
             if lesson["group"] == group_id:
                 result.append({
+                    "number_lesson" : lesson["number_lesson"],
                     "time": lesson["number_lesson"],
                     "subject": disciplines.get(lesson["discipline"], "Неизвестно"),
-                    "teacher": teachers.get(lesson["teacher"], "Неизвестно")
+                    "teacher": teachers.get(lesson["teacher"], "Неизвестно"),
+                    "subgroup": lesson.get("subgroup"),
+                    "cabinet": audithories.get(lesson.get("auditoria"), "Неизвестно")
                 })
 
     return result
-
-if __name__ == "__main__":
-    data = parse_schedule("418", 1776020400000)
-
-    for lesson in data:
-        print(lesson)
