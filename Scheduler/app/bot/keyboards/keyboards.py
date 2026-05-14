@@ -1,17 +1,34 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from app.data.parser.parser import get_groups_by_courses
+from app.utils.date_utils import format_date
+from datetime import datetime
 
 def chunked(lst, n):
     for i in range(0, len(lst), n):
         yield lst[i:i+n]
 
-def main_keyboard():
+def main_keyboard(group=None):
+    if group:
+        text = f"Моя группа ({group})"
+    else:
+        text = "Моя группа (сохранить)"
+
     buttons = [
-        [InlineKeyboardButton(text="Расписание на сегодня", callback_data=f"today")],
+        [InlineKeyboardButton(text="Расписание на сегодня", callback_data=f"my_today")],
+        [InlineKeyboardButton(text=text, callback_data="my_group")],
         [InlineKeyboardButton(text="Выбрать группу", callback_data=f"courses")]
     ]
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def my_group_actions_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Сегодня", callback_data="my_today")],
+        [InlineKeyboardButton(text="Завтра", callback_data="my_tomorrow")],
+        [InlineKeyboardButton(text="Подробно", callback_data="my_full")],
+        [InlineKeyboardButton(text="Сменить группу", callback_data="change_group")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
+    ])
 
 def courses_inline_keyboard():
     courses, newest_course = get_groups_by_courses()
@@ -28,6 +45,8 @@ def courses_inline_keyboard():
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# Доступные группы
 
 def groups_inline_keyboard(course):
     courses, newest_course = get_groups_by_courses()
@@ -47,33 +66,40 @@ def groups_inline_keyboard(course):
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+def days_keyboard(days):
+    buttons = []
 
+    for date in sorted(days):
+        date_obj = datetime.strptime(date, "%Y-%m-%d")
 
-# def courses_keyboard():
-#     newKeyboard = [
-#         [KeyboardButton(text="Назад")],
-#     ]
+        if date_obj.weekday() == 6: #skip sunday
+            continue
 
-#     for i in range(1, 5):
-#         newKeyboard.append([KeyboardButton(text = f"{i} курс")])
+        buttons.append([
+            InlineKeyboardButton(
+                text=format_date(date),
+                callback_data=f"day:{date}"
+            )
+        ])
+        
+    # кнопка назад
+    buttons.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+    ])
 
-#     return ReplyKeyboardMarkup(
-#         keyboard=newKeyboard,
-#         resize_keyboard=True
-#     )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# def groups_keyboard(course):
-#     newKeyboard = [
-#         [KeyboardButton(text="Назад")],
-#     ]
+# Кнопки Назад
 
-#     courses, newest_course = get_groups_by_courses()
-#     course_hundred = newest_course - (int(course) - 1) * 100
+def back_keyboard():
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Выбрать курс", callback_data="back_to_courses")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")],
+    ]
 
-#     for group in courses.get(course_hundred, []):
-#         newKeyboard.append([KeyboardButton(text=str(group))])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-#     return ReplyKeyboardMarkup(
-#         keyboard=newKeyboard,
-#         resize_keyboard=True
-#     )
+def back_to_days_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_days")]
+    ])

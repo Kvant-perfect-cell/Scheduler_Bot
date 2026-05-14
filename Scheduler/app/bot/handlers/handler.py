@@ -2,15 +2,19 @@ from aiogram import Router
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.filters import Command
 from html import escape
+from datetime import datetime, timedelta
 
 from app.bot.keyboards import keyboards
 from app.services.schedule_service import get_schedule_for_today
-from app.services.user_service import set_user_group, get_user_group
-from app.data.parser.parser import get_base_info
+from app.services.user_service import set_user_group, get_user_group, set_temp_group, get_temp_group
+from app.data.parser.parser import get_base_info, parse_schedule, get_today_timestamp
+from app.utils.date_utils import format_date
 
 router = Router()
 
 user_groups = {}
+
+changing_group = set()
 
 LESSON_TIMES = {
     1: "08:30 - 9:50",
@@ -26,38 +30,39 @@ LESSON_TIMES = {
 def split_message(text, max_length=4000):
     return [text[i:i+max_length] for i in range(0, len(text), max_length)]
 
-def return_schedule(group):
-    schedule = get_schedule_for_today(group)
+def format_schedule(group, date, lessons):
+    text = (
+        f"<b>Расписание</b>\n"
+        f"<b>Группа:</b> <code>{escape(str(group))}</code>\n"
+        f"<b>Дата:</b> {escape(format_date(date))}\n\n"
+    )
 
-    if not schedule:
-        return False
-
-    text = f"<b>Расписание на сегодня</b>\n<b>Группа:</b> <code>{escape(str(group))}</code>\n\n"
-
-    for lesson in schedule:
+    for lesson in lessons:
         lesson_number = lesson.get("number_lesson", lesson["time"])
         time = LESSON_TIMES.get(lesson["time"], str(lesson["time"]))
         subject = escape(lesson["subject"])
         teacher = escape(lesson["teacher"])
-        subgroup = ""
-        if lesson.get("subgroup") != 0:
-            subgroup = f"\n<b>Подгруппа:</b> {escape(str(lesson.get('subgroup')))}"
-        cabinet = escape(str(lesson.get("cabinet") or "Не указан"))
 
+        subgroup = ""
+        if lesson.get("subgroup") and lesson.get("subgroup") != 0:
+            subgroup = f"\n<b>Подгруппа:</b> {escape(str(lesson.get('subgroup')))}"
+
+        cabinet = escape(str(lesson.get("cabinet") or "Не указан"))
 
         text += (
             f"<b>{lesson_number} пара</b>  <code>{escape(time)}</code>\n"
             f"{subject}\n"
             f"<b>Преподаватель:</b> {teacher}{subgroup}\n"
-            f"<b>{cabinet}</b> \n"
+            f"<b>{cabinet}</b>\n"
             f"━━━━━━━━━━━━━━\n"
         )
-        
+
     return text
     
 
 # НАЧАЛЬНОЕ ОКНО
 
+# /start
 @router.message(Command("start"))
 async def start_handler(message: Message):
     get_base_info()
@@ -67,52 +72,29 @@ async def start_handler(message: Message):
     )
     await msg.delete()
     
+    group = get_user_group(message.from_user.id)
+
     await message.answer(
         "Привет! Выбери действие 👇",
-        reply_markup=keyboards.main_keyboard(),
+        reply_markup=keyboards.main_keyboard(group),
     )
 
+# КНОПКОЙ
+@router.callback_query(lambda c: c.data == ("back_to_main"))
+async def start_handler_callback(callback: CallbackQuery):
+    group = get_temp_group(callback.from_user.id)
 
-# @router.message(lambda message: message.text == "Расписание на сегодня")
-# async def today_button_handler(message: Message):
-#     group = get_user_group(message.from_user.id)
-
-#     if not group:
-#         await message.answer("Сначала установи группу: /setgroup 501")
-#         return
-
-#     schedule = get_schedule_for_today(group)
-
-#     if not schedule:
-#         await message.answer("🎉 Сегодня пар нет!")
-#         return
-
-#     text = f"📅 Сегодня ({group}):\n\n"
-
-#     for lesson in schedule:
-#         time = LESSON_TIMES.get(lesson["time"], str(lesson["time"]))
-#         subject = lesson["subject"]
-#         teacher = lesson["teacher"]
-
-#         text += f"{time}\n{subject}\n👨‍🏫 {teacher}\n\n"
-
-#     for part in split_message(text):
-#         await message.answer(part)
-
-# @router.message(lambda message: message.text == "Выбрать группу")
-# async def select_group(message: Message):
-   
-#     await message.answer(
-#         "Выберите курс:",
-#         reply_markup=keyboards.courses_keyboard()
-#     )
+    await callback.message.edit_text(
+        "Выбери действие 👇",
+        reply_markup=keyboards.main_keyboard(group)
+    )
 
 # ОКНО ПОСЛЕ НАЧАТИЯ "Выбрать группу"
 
 @router.callback_query(lambda c: c.data.startswith("courses"))
-async def group_selected(callback: CallbackQuery):
+async def select_group_callback(callback: CallbackQuery):
 
-    await callback.message.answer(
+    await callback.message.edit_text(
         "Сначала выбери курс 👇",
         reply_markup=keyboards.courses_inline_keyboard()
     )
@@ -133,10 +115,10 @@ async def select_course(message: Message):
 
 # КНОПКОЙ
 @router.callback_query(lambda c: c.data.startswith("course:"))
-async def group_selected(callback: CallbackQuery):
+async def select_course_callback(callback: CallbackQuery):
     course = callback.data.split(":")[1]
 
-    await callback.message.answer(
+    await callback.message.edit_text(
         "Выбери группу 👇",
         reply_markup=keyboards.groups_inline_keyboard(course)
     )
@@ -147,53 +129,216 @@ async def group_selected(callback: CallbackQuery):
 
 # ТЕКСТОМ
 @router.message(lambda message: message.text and message.text.isdigit())
-async def group_selected_text(message: Message):
+async def group_selected(message: Message):
     group = message.text
-    await message.answer(f"Группа выбрана: {group}, готовим расписание...")
+    bot_message = await message.answer(f"Группа выбрана: {group}, готовим расписание...")
+    
+    set_temp_group(message.from_user.id, group)
 
-    text = return_schedule(group)
+    user_id = message.from_user.id
 
-    if text == False:
-        await message.answer("Для этой группы пар нет/такой группы не существует",
-            reply_markup=keyboards.main_keyboard_text())
+    set_temp_group(user_id, group)
+
+    if user_id in changing_group:
+        set_user_group(user_id, group)
+        changing_group.remove(user_id)
+
+    schedule = parse_schedule(group, get_today_timestamp())
+    if not schedule:
+        await bot_message.edit_text(
+            "Для этой группы нет расписания",
+            reply_markup=keyboards.back_keyboard()
+        )
         return
 
-    for part in split_message(text):
-        await message.answer(part, parse_mode="HTML")
+    await bot_message.edit_text(
+        "Выбери день 👇",
+        reply_markup=keyboards.days_keyboard(schedule.keys())
+    )
 
 # КНОПКОЙ
 @router.callback_query(lambda c: c.data.startswith("group:"))
-async def group_selected(callback: CallbackQuery):
+async def group_selected_callback(callback: CallbackQuery):
     group = callback.data.split(":")[1]
 
-    # set_user_group(callback.from_user.id, group)
+    user_id = callback.from_user.id
+
+    set_temp_group(user_id, group)
+
+    if user_id in changing_group:
+        set_user_group(user_id, group)
+        changing_group.remove(user_id)
+
+    if not get_user_group(callback.from_user.id):
+        set_user_group(callback.from_user.id, group)
 
     await callback.message.edit_text(
         f"Группа выбрана: {group}, готовим расписание..."
     )
     
-    text = return_schedule(group)
-
-    if text == False:
-        await callback.message.answer("Для этой группы пар нет/такой группы не существует",
-            reply_markup=keyboards.main_keyboard())
+    schedule = parse_schedule(group, get_today_timestamp())
+    if not schedule:
+        await callback.message.edit_text(
+            "Для этой группы нет расписания",
+            reply_markup=keyboards.back_keyboard()
+        )
         return
 
-    for part in split_message(text):
-        await callback.message.answer(
-            part,
-            parse_mode="HTML",
-            reply_markup=keyboards.main_keyboard())
+    await callback.message.edit_text(
+        "Выбери день 👇",
+        reply_markup=keyboards.days_keyboard(schedule.keys())
+    )
 
     await callback.answer()
 
-# @router.callback_query(lambda c: c.data == "back_to_main")
-# async def back_to_courses(callback: CallbackQuery):
-#     await callback.message.edit_text(
-#         "Выберите курс:",
-#         reply_markup=keyboards.main_keyboard()
-#     )
-#     await callback.answer()
+# ВЫБОР ДНЯ
+
+@router.callback_query(lambda c: c.data.startswith("day:"))
+async def day_selected(callback: CallbackQuery):
+    date = callback.data.split(":")[1]
+
+    group = get_temp_group(callback.from_user.id)
+
+    schedule = parse_schedule(group, get_today_timestamp())
+    lessons = schedule.get(date)
+
+    if not lessons:
+        await callback.message.edit_text("На этот день пар нет")
+        return
+
+    text = format_schedule(group, date, lessons)
+
+    parts = split_message(text)
+
+    await callback.message.edit_text(
+        parts[0],
+        parse_mode="HTML",
+        reply_markup=keyboards.back_to_days_keyboard()
+    )
+
+    for part in parts[1:]:
+        await callback.message.answer(part, parse_mode="HTML")
+
+    await callback.answer()
+
+# ВЗАИМОДЕЙСВИЯ С ГРУППОЙ
+@router.callback_query(lambda c: c.data == "my_group")
+async def my_group_handler(callback: CallbackQuery):
+    group = get_user_group(callback.from_user.id)
+
+    if not group:
+        await callback.message.edit_text(
+            "Выберите группу 👇",
+            reply_markup=keyboards.courses_inline_keyboard()
+        )
+        await callback.answer()
+        return
+
+    await callback.message.edit_text(
+        f"Твоя группа: <code>{group}</code>\nВыбери действие 👇",
+        parse_mode="HTML",
+        reply_markup=keyboards.my_group_actions_keyboard()
+    )
+
+    await callback.answer()
+
+# СМЕНА ГРУППЫ
+@router.callback_query(lambda c: c.data == "change_group")
+async def change_group(callback: CallbackQuery):
+    changing_group.add(callback.from_user.id)   
+    set_user_group(callback.from_user.id, None)
+    set_temp_group(callback.from_user.id, None)
+
+
+    await callback.message.edit_text(
+        "Выберите новую группу 👇",
+        reply_markup=keyboards.courses_inline_keyboard()
+    )
+
+    await callback.answer()
+
+# РАСПИСАНИЕЙ СВОЕЙ ГРУППЫ
+@router.callback_query(lambda c: c.data == "my_full")
+async def my_full(callback: CallbackQuery):
+    group = get_user_group(callback.from_user.id)
+
+    schedule = parse_schedule(group, get_today_timestamp())
+
+    await callback.message.edit_text(
+        "Выбери день 👇",
+        reply_markup=keyboards.days_keyboard(schedule.keys())
+    )
+
+    await callback.answer()
+
+# РАСПИСАНИЕ СВОЕЙ ГРУППЫ СЕГОДНЯ
+@router.callback_query(lambda c: c.data == "my_today")
+async def my_today(callback: CallbackQuery):
+    group = get_user_group(callback.from_user.id)
+
+    from app.data.parser.parser import parse_schedule, get_today_timestamp
+
+    schedule = parse_schedule(group, get_today_timestamp())
+
+    today = str(datetime.now().date())
+    lessons = schedule.get(today)
+
+    if not lessons:
+        await callback.message.edit_text("Сегодня пар нет")
+        return
+
+    text = format_schedule(group, today, lessons)
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboards.back_to_days_keyboard()
+    )
+
+    await callback.answer()
+
+# РАСПИСАНИЕ СВОЕЙ ГРУППЫ ЗАВТРА
+@router.callback_query(lambda c: c.data == "my_tomorrow")
+async def my_tomorrow(callback: CallbackQuery):
+    group = get_user_group(callback.from_user.id)
+
+    from app.data.parser.parser import parse_schedule, get_today_timestamp
+
+    schedule = parse_schedule(group, get_today_timestamp())
+
+    tomorrow = str((datetime.now() + timedelta(days=1)).date())
+    lessons = schedule.get(tomorrow)
+
+    if not lessons:
+        await callback.message.edit_text("Завтра пар нет")
+        return
+
+    text = format_schedule(group, tomorrow, lessons)
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboards.back_to_days_keyboard()
+    )
+
+    await callback.answer()
+
+@router.callback_query(lambda c: c.data == "back_to_days")
+async def back_to_days(callback: CallbackQuery):
+    group = get_temp_group(callback.from_user.id)
+
+    schedule = parse_schedule(group, get_today_timestamp())
+
+    if not schedule:
+        await callback.message.edit_text("Нет доступных дней")
+        return
+    
+    await callback.message.edit_text(
+        "Выбери день 👇",
+        reply_markup=keyboards.days_keyboard(schedule.keys())
+    )
+
+    await callback.answer()
 
 @router.callback_query(lambda c: c.data == "back_to_courses")
 async def back_to_courses(callback: CallbackQuery):

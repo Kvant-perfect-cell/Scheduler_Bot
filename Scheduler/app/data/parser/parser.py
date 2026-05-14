@@ -1,11 +1,15 @@
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
 
 BASE_URL = "https://surpk.ru/api/schedule"
 
 base_info = 0
 dictionaries_data = 0
-schedule_raw_data = 0
+schedule_cache = None
+schedule_cache_time = None
+CACHE_TTL = 1800  # 30 минут
+parsed_cache = {}
 
 def get_base_info():
     global base_info
@@ -37,16 +41,23 @@ def get_dictionaries():
     return dictionaries_data
 
 def get_schedule_raw(timestamp):
-    global schedule_raw_data
-    if schedule_raw_data == 0:
-        url = f"{BASE_URL}/schedule"
-        response = requests.get(url, params={"date": timestamp})
+    global schedule_cache, schedule_cache_time
 
-        # print("STATUS:", response.status_code)
-        # print("TEXT:", response.text[:200])
+    now = datetime.now().timestamp()
 
-        schedule_raw_data = response.json()
-    return schedule_raw_data["schedule"]["data"]["schedule"]
+    if schedule_cache and schedule_cache_time:
+        if now - schedule_cache_time < CACHE_TTL:
+            return schedule_cache
+
+    url = f"{BASE_URL}/schedule"
+    response = requests.get(url, params={"date": timestamp})
+
+    data = response.json()["schedule"]["data"]["schedule"]
+
+    schedule_cache = data
+    schedule_cache_time = now
+
+    return data
 
 def get_today_timestamp():
     today = datetime.now()
@@ -76,6 +87,17 @@ def get_groups_by_courses():
     return courses, newest_course
 
 def parse_schedule(group_name: str, timestamp: int):
+    global parsed_cache
+
+    cache_key = f"{group_name}"
+    now = time.time()
+
+    if cache_key in parsed_cache:
+        data, saved_time = parsed_cache[cache_key]
+
+        if now - saved_time < CACHE_TTL:
+            return data
+
     dictionaries = get_dictionaries()
     
     groups = dictionaries["groups"]
@@ -83,7 +105,6 @@ def parse_schedule(group_name: str, timestamp: int):
     teachers = dictionaries["teachers"]
     audithories = dictionaries["audithories"]
 
-    # найти id группы по имени
     group_id = None
     for gid, name in groups.items():
         if name == group_name:
@@ -91,24 +112,25 @@ def parse_schedule(group_name: str, timestamp: int):
             break
 
     if not group_id:
-        return []
+        return {}
 
     schedule_days = get_schedule_raw(timestamp)
 
-    today = datetime.now().date()
+    result = {}
 
-    result = []
+    today = datetime.now().date()
+    start = today - timedelta(days=today.weekday())   # monday this week
+    end = start + timedelta(days=13)                  # sunday next week
 
     for day in schedule_days:
         day_date = datetime.fromtimestamp(day["date"] / 1000).date()
 
-        if day_date != today:
-            continue
-        
+        lessons = []
+
         for lesson in day["lessons"]:
             if lesson["group"] == group_id:
-                result.append({
-                    "number_lesson" : lesson["number_lesson"],
+                lessons.append({
+                    "number_lesson": lesson["number_lesson"],
                     "time": lesson["number_lesson"],
                     "subject": disciplines.get(lesson["discipline"], "Неизвестно"),
                     "teacher": teachers.get(lesson["teacher"], "Неизвестно"),
@@ -116,4 +138,8 @@ def parse_schedule(group_name: str, timestamp: int):
                     "cabinet": audithories.get(lesson.get("auditoria"), "Неизвестно")
                 })
 
+        if lessons and (start <= day_date <= end):
+            result[str(day_date)] = lessons
+
+    parsed_cache[cache_key] = (result, now)
     return result
