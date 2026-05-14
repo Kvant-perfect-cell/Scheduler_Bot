@@ -5,7 +5,6 @@ from html import escape
 from datetime import datetime, timedelta
 
 from app.bot.keyboards import keyboards
-from app.services.schedule_service import get_schedule_for_today
 from app.services.user_service import set_user_group, get_user_group, set_temp_group, get_temp_group
 from app.data.parser.parser import get_base_info, parse_schedule, get_today_timestamp
 from app.utils.date_utils import format_date
@@ -82,7 +81,8 @@ async def start_handler(message: Message):
 # КНОПКОЙ
 @router.callback_query(lambda c: c.data == ("back_to_main"))
 async def start_handler_callback(callback: CallbackQuery):
-    group = get_temp_group(callback.from_user.id)
+    group = get_user_group(callback.from_user.id)
+    print("Back to main, getting user temp group:", group, "main:", get_user_group(callback.from_user.id))
 
     await callback.message.edit_text(
         "Выбери действие 👇",
@@ -132,8 +132,6 @@ async def select_course_callback(callback: CallbackQuery):
 async def group_selected(message: Message):
     group = message.text
     bot_message = await message.answer(f"Группа выбрана: {group}, готовим расписание...")
-    
-    set_temp_group(message.from_user.id, group)
 
     user_id = message.from_user.id
 
@@ -152,7 +150,7 @@ async def group_selected(message: Message):
         return
 
     await bot_message.edit_text(
-        "Выбери день 👇",
+        f"Группа {group}, Выбери день 👇",
         reply_markup=keyboards.days_keyboard(schedule.keys())
     )
 
@@ -162,15 +160,11 @@ async def group_selected_callback(callback: CallbackQuery):
     group = callback.data.split(":")[1]
 
     user_id = callback.from_user.id
-
     set_temp_group(user_id, group)
 
     if user_id in changing_group:
         set_user_group(user_id, group)
         changing_group.remove(user_id)
-
-    if not get_user_group(callback.from_user.id):
-        set_user_group(callback.from_user.id, group)
 
     await callback.message.edit_text(
         f"Группа выбрана: {group}, готовим расписание..."
@@ -185,7 +179,7 @@ async def group_selected_callback(callback: CallbackQuery):
         return
 
     await callback.message.edit_text(
-        "Выбери день 👇",
+        f"Группа {group}, Выбери день 👇",
         reply_markup=keyboards.days_keyboard(schedule.keys())
     )
 
@@ -227,6 +221,10 @@ async def my_group_handler(callback: CallbackQuery):
     group = get_user_group(callback.from_user.id)
 
     if not group:
+        changing_group.add(callback.from_user.id)   
+        set_user_group(callback.from_user.id, None)
+        set_temp_group(callback.from_user.id, None)
+
         await callback.message.edit_text(
             "Выберите группу 👇",
             reply_markup=keyboards.courses_inline_keyboard()
@@ -323,6 +321,8 @@ async def my_tomorrow(callback: CallbackQuery):
 
     await callback.answer()
 
+# Кнопки Назад
+
 @router.callback_query(lambda c: c.data == "back_to_days")
 async def back_to_days(callback: CallbackQuery):
     group = get_temp_group(callback.from_user.id)
@@ -334,7 +334,7 @@ async def back_to_days(callback: CallbackQuery):
         return
     
     await callback.message.edit_text(
-        "Выбери день 👇",
+        f"Группа {group}, Выбери день 👇",
         reply_markup=keyboards.days_keyboard(schedule.keys())
     )
 
