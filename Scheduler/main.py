@@ -14,7 +14,7 @@ dp.include_router(router)
 
 async def main():
     asyncio.create_task(notification_worker(bot))
-    print("Notification worker started")
+
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

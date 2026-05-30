@@ -10,11 +10,9 @@ from app.services.notification_service import add_notification, get_notification
 from app.data.parser.parser import get_base_info, parse_schedule, get_today_timestamp
 from app.utils.date_utils import format_date
 from app.config.config import get_lesson_times
-from datetime import datetime, timedelta
 
 LESSON_TIMES = get_lesson_times()
 
-user_groups = {}
 user_notify_lesson = {}
 
 router = Router()
@@ -33,7 +31,7 @@ def format_schedule(group, date, lessons):
 
     for lesson in lessons:
         lesson_number = lesson.get("number_lesson", lesson["time"])
-        time = get_lesson_times().get(lesson["time"], str(lesson["time"]))
+        time = LESSON_TIMES[lesson["time"]]
         subject = escape(lesson["subject"])
         teacher = escape(lesson["teacher"])
 
@@ -156,8 +154,6 @@ async def handle_numbers(message: Message):
         )
 
         lesson = user_notify_lesson[user_id]
-        group = get_user_group(user_id)
-        print("SAVE NOTIFICATION")
         add_notification(
             user_id=user_id,
             lesson=lesson,

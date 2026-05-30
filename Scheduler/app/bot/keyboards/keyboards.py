@@ -98,7 +98,7 @@ def days_keyboard(days):
 def lessons_keyboard():
     buttons = []
 
-    for i in range(1, 7):
+    for i in LESSON_TIMES.keys():
         buttons.append([
             InlineKeyboardButton(
                 text=f"Пара {i} ({LESSON_TIMES[i]})",

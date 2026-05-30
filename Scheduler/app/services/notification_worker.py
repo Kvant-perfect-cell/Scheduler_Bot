@@ -10,10 +10,7 @@ async def notification_worker(bot):
     while True:
         now = datetime.now()
 
-        print("worker alive", now.strftime("%H:%M:%S"))
-
         notifications = get_notifications()
-        print("notifications:", notifications)
 
         for n in notifications:
             if n.get("sent", False):
@@ -42,18 +39,7 @@ async def notification_worker(bot):
 
             diff = (now - notify_time).total_seconds()
 
-            print(
-                f"lesson={lesson_num}, "
-                f"notify_time={notify_time.strftime('%H:%M:%S')}, "
-                f"now={now.strftime('%H:%M:%S')}, "
-                f"diff={diff}"
-            )
-
             if 0 <= diff <= 60:
-                print(
-                    f"SEND: user={n['user_id']} "
-                    f"lesson={lesson_num}"
-                )
 
                 await bot.send_message(
                     n["user_id"],
