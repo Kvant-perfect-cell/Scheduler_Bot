@@ -1,11 +1,11 @@
 notifications = []
 
-def add_notification(user_id, group, lesson, minutes_before):
+def add_notification(user_id, lesson, minutes_before):
     notifications.append({
         "user_id": user_id,
-        "group": group,
         "lesson": lesson,
-        "minutes_before": minutes_before
+        "minutes_before": minutes_before,
+        "sent": False
     })
 
 def get_notifications():

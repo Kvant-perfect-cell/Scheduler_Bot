@@ -157,10 +157,9 @@ async def handle_numbers(message: Message):
 
         lesson = user_notify_lesson[user_id]
         group = get_user_group(user_id)
-
+        print("SAVE NOTIFICATION")
         add_notification(
             user_id=user_id,
-            group=group,
             lesson=lesson,
             minutes_before=minutes
         )
