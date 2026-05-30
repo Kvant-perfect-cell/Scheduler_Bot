@@ -1,4 +1,5 @@
 from app.bot.handlers.handler import router
+from app.services.notification_worker import notification_worker
 import asyncio
 from aiogram import Bot, Dispatcher
 from dotenv import load_dotenv
@@ -16,3 +17,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    asyncio.create_task(notification_worker(bot))

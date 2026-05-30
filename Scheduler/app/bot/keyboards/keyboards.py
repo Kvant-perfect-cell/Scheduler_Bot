@@ -2,6 +2,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from app.data.parser.parser import get_groups_by_courses
 from app.utils.date_utils import format_date
 from datetime import datetime
+from app.config.config import get_lesson_times
+
+LESSON_TIMES = get_lesson_times()
 
 def chunked(lst, n):
     for i in range(0, len(lst), n):
@@ -15,8 +18,10 @@ def main_keyboard(group=None):
 
     buttons = [
         [InlineKeyboardButton(text="Расписание на сегодня", callback_data=f"my_today")],
+        [InlineKeyboardButton(text="🔔 Напоминания", callback_data="notifications")],
         [InlineKeyboardButton(text=text, callback_data="my_group")],
-        [InlineKeyboardButton(text="Выбрать группу", callback_data=f"courses")]
+        [InlineKeyboardButton(text="Выбрать группу", callback_data=f"courses")],
+        
     ]
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -88,6 +93,64 @@ def days_keyboard(days):
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# Пары для напоминаний
+def lessons_keyboard():
+    buttons = []
+
+    for i in range(1, 7):
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"Пара {i} ({LESSON_TIMES[i]})",
+                callback_data=f"notify_lesson:{i}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# Просмотр напоминаний
+def notifications_menu_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="Добавить напоминание",
+            callback_data="notifications_add"
+        )],
+        [InlineKeyboardButton(
+            text="Мои напоминания",
+            callback_data="notifications_list"
+        )],
+        [InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="back_to_main"
+        )]
+    ])
+
+def notification_list_keyboard(all_notifications, user_id):
+    rows = []
+
+    for idx, n in enumerate(all_notifications):
+        if n["user_id"] != user_id:
+            continue
+
+        rows.append([
+            InlineKeyboardButton(
+                text=f"❌ Пара {n['lesson']} ({n['minutes_before']} мин)",
+                callback_data=f"delete_notify:{idx}"
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="notifications"
+        )
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 # Кнопки Назад
 

@@ -6,25 +6,20 @@ from datetime import datetime, timedelta
 
 from app.bot.keyboards import keyboards
 from app.services.user_service import set_user_group, get_user_group, set_temp_group, get_temp_group
+from app.services.notification_service import add_notification, get_notifications, delete_notification
 from app.data.parser.parser import get_base_info, parse_schedule, get_today_timestamp
 from app.utils.date_utils import format_date
+from app.config.config import get_lesson_times
+from datetime import datetime, timedelta
+
+LESSON_TIMES = get_lesson_times()
+
+user_groups = {}
+user_notify_lesson = {}
 
 router = Router()
 
-user_groups = {}
-
 changing_group = set()
-
-LESSON_TIMES = {
-    1: "08:30 - 9:50",
-    2: "10:00 - 11:20",
-    3: "12:10 - 13:30",
-    4: "13:40 - 15:00",
-    5: "15:10 - 16:30",
-    6: "16:40 - 18:00",
-    7: "18:10 - 19:30",
-    8: "19:40 - 21:00",
-}
 
 def split_message(text, max_length=4000):
     return [text[i:i+max_length] for i in range(0, len(text), max_length)]
@@ -38,7 +33,7 @@ def format_schedule(group, date, lessons):
 
     for lesson in lessons:
         lesson_number = lesson.get("number_lesson", lesson["time"])
-        time = LESSON_TIMES.get(lesson["time"], str(lesson["time"]))
+        time = get_lesson_times().get(lesson["time"], str(lesson["time"]))
         subject = escape(lesson["subject"])
         teacher = escape(lesson["teacher"])
 
@@ -82,7 +77,6 @@ async def start_handler(message: Message):
 @router.callback_query(lambda c: c.data == ("back_to_main"))
 async def start_handler_callback(callback: CallbackQuery):
     group = get_user_group(callback.from_user.id)
-    print("Back to main, getting user temp group:", group, "main:", get_user_group(callback.from_user.id))
 
     await callback.message.edit_text(
         "Выбери действие 👇",
@@ -128,12 +122,55 @@ async def select_course_callback(callback: CallbackQuery):
 # ОКНО ПОСЛЕ ВЫБОРА ГРУППЫ
 
 # ТЕКСТОМ
-@router.message(lambda message: message.text and message.text.isdigit())
-async def group_selected(message: Message):
+@router.message(lambda m: m.text and m.text.isdigit())
+async def handle_numbers(message: Message):
+    user_id = message.from_user.id
+
+    # если это ввод для напоминаний
+    if user_id in user_notify_lesson:
+        minutes = int(message.text)
+
+        if not (5 <= minutes <= 60):
+            await message.answer("Введи число от 5 до 60")
+            return
+
+        lesson = user_notify_lesson[user_id]
+        lesson_time = get_lesson_times()[lesson]
+
+        start_time = datetime.strptime(
+        lesson_time.split(" - ")[0],
+        "%H:%M"
+        )
+
+        notify_time = (
+            datetime.combine(datetime.today(), start_time.time())
+            - timedelta(minutes=minutes)
+        ).strftime("%H:%M")
+
+        
+
+        await message.answer(
+            f"✅ Напомню за {minutes} минут до начала {lesson} пары.\n"
+            f"⏰ Время напоминания: {notify_time}",
+            reply_markup=keyboards.main_keyboard()
+        )
+
+        lesson = user_notify_lesson[user_id]
+        group = get_user_group(user_id)
+
+        add_notification(
+            user_id=user_id,
+            group=group,
+            lesson=lesson,
+            minutes_before=minutes
+        )
+        
+        del user_notify_lesson[user_id]
+        return
+
+    # иначе это выбор группы
     group = message.text
     bot_message = await message.answer(f"Группа выбрана: {group}, готовим расписание...")
-
-    user_id = message.from_user.id
 
     set_temp_group(user_id, group)
 
@@ -142,6 +179,7 @@ async def group_selected(message: Message):
         changing_group.remove(user_id)
 
     schedule = parse_schedule(group, get_today_timestamp())
+
     if not schedule:
         await bot_message.edit_text(
             "Для этой группы нет расписания",
@@ -282,7 +320,10 @@ async def my_today(callback: CallbackQuery):
     lessons = schedule.get(today)
 
     if not lessons:
-        await callback.message.edit_text("Сегодня пар нет")
+        await callback.message.edit_text(
+            "Сегодня пар нет", 
+             reply_markup=keyboards.main_keyboard()
+        )
         return
 
     text = format_schedule(group, today, lessons)
@@ -320,6 +361,81 @@ async def my_tomorrow(callback: CallbackQuery):
     )
 
     await callback.answer()
+
+# НАПОМИНАНИЯ
+
+@router.callback_query(lambda c: c.data == "notifications")
+async def notifications_menu(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "Управление напоминаниями 👇",
+        reply_markup=keyboards.notifications_menu_keyboard()
+    )
+    await callback.answer()
+
+@router.callback_query(lambda c: c.data == "notifications_add")
+async def notifications_add(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "Выбери пару 👇",
+        reply_markup=keyboards.lessons_keyboard()
+    )
+    await callback.answer()
+
+@router.callback_query(lambda c: c.data.startswith("notify_lesson:"))
+async def select_lesson(callback: CallbackQuery):
+    lesson = int(callback.data.split(":")[1])
+
+    user_notify_lesson[callback.from_user.id] = lesson
+
+    await callback.message.edit_text(
+        "Введи за сколько минут напомнить (5-60):"
+    )
+    await callback.answer()
+
+@router.callback_query(lambda c: c.data == "notifications_list")
+async def notifications_list(callback: CallbackQuery):
+    user_id = callback.from_user.id
+
+    all_notifications = get_notifications()
+
+    user_notifications = [
+        n for n in all_notifications
+        if n["user_id"] == user_id
+    ]
+
+    if not user_notifications:
+        await callback.message.edit_text(
+            "📋 У тебя нет активных напоминаний.",
+            reply_markup=keyboards.notifications_menu_keyboard()
+        )
+        return
+
+    text = "📋 Активные напоминания:\n\n"
+
+    for i, n in enumerate(user_notifications, start=1):
+        text += (
+            f"{i}. Пара {n['lesson']} "
+            f"(за {n['minutes_before']} мин.)\n"
+        )
+
+    await callback.message.edit_text(
+    text,
+    reply_markup=keyboards.notification_list_keyboard(
+        all_notifications,
+        user_id
+        )
+    )
+
+    await callback.answer()
+
+@router.callback_query(lambda c: c.data.startswith("delete_notify:"))
+async def delete_notification_handler(callback: CallbackQuery):
+    index = int(callback.data.split(":")[1])
+
+    delete_notification(index)
+
+    await callback.answer("Напоминание удалено ✅")
+
+    await notifications_list(callback)
 
 # Кнопки Назад
 
